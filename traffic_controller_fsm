@@ -1,0 +1,2652 @@
+#include <reg51.h>
+
+
+
+#include <intrins.h> // for _nop_()
+
+
+
+#define uchar unsigned char
+
+
+
+#define uint unsigned int
+
+
+
+#define ldata P2
+
+
+
+#define COMMAND 0
+
+
+
+#define LCD_DATA 1
+
+
+
+#define ONE_SECOND 20000// million us in one seconds, delay is 25us million/25 = 40000
+
+
+
+//#define SIXSECOND 75 // 6000ms / 80 ms/cycle = 75
+
+
+
+//#define TWOSECOND 25 // 2000ms / 80 ms/cycle = 25
+
+
+
+#define HALF_SECOND 10000
+
+
+
+#define Set_CGRAM_Address  0x40 // 0  1  A  A  A  A  A  A
+
+
+
+#define Set_DDRAM_Address  0x80 // 1  A  A  A  A  A  A  A
+
+
+
+#define Line2_Offset  0x40
+
+// prototypes
+
+
+
+void outputLogic(void);
+
+
+
+void nextStateLogic(void);
+
+
+void delay_ms(void);
+
+
+
+void run6secDelay(void);
+
+
+
+void run2secDelay(void);
+
+
+
+void T1M2_25usDelay(void);
+
+
+
+void init_lcd(void);
+
+
+
+void write_to_lcd(unsigned char value, bit mode);
+
+
+
+void MSDelay(unsigned int itime);
+
+
+
+void lcdready(void);
+
+
+
+
+// states
+
+
+
+uchar presentState;
+
+
+
+uchar nextState;
+
+
+
+
+
+
+
+// counter for lcd
+
+
+
+uchar counter = 0;
+
+
+
+uint i;
+
+
+
+uint w;
+
+
+
+uint s;
+
+
+
+
+
+
+
+// outputs
+
+
+
+bit NSR = 0;
+
+
+
+bit NSY = 0;
+
+
+
+bit NSG = 0;
+
+
+
+bit EWR = 0;
+
+
+
+bit EWY = 0;
+
+
+
+bit EWG = 0;
+
+
+
+bit NSC = 0;
+
+
+
+bit EWC = 0;
+
+
+
+
+
+
+
+// interruptflags
+
+
+
+bit fNSC;
+
+
+
+bit fEWC;
+
+
+
+
+
+
+
+// cross walk buttons
+
+
+
+sbit bNSC = P3^3;  // interrupt
+
+
+
+sbit bEWC = P3^2; 
+
+
+
+
+
+
+
+// board
+
+
+
+//lights
+
+
+
+sbit _NSG = P1^0;
+
+
+
+sbit _NSY = P1^1;
+
+
+
+sbit _NSR = P1^2;
+
+
+
+sbit _NSC = P1^3;
+
+
+
+sbit _EWG = P1^4;
+
+
+
+sbit _EWY = P1^5;
+
+
+
+sbit _EWR = P1^6;
+
+
+
+sbit _EWC = P1^7;
+
+
+
+
+
+
+
+// LCD
+
+
+
+sbit DB0 = P2^0;
+
+
+
+sbit DB1 = P2^1;
+
+
+
+sbit DB2 = P2^2;
+
+
+
+sbit DB3 = P2^3;
+
+
+
+sbit DB4 = P2^4;
+
+
+
+sbit DB5 = P2^5;
+
+
+
+sbit DB6 = P2^6;
+
+
+
+sbit DB7 = P2^7;
+
+
+
+sbit EN  = P3^7;
+
+
+
+sbit RS  = P3^6;
+
+
+
+sbit RW  = P3^5;
+
+
+
+sbit busy = P2^7;
+
+
+
+
+
+
+
+// uchar codes for lcd
+
+
+
+uchar ZERO = '0';
+
+
+
+uchar ONE = '1';
+
+
+
+uchar TWO = '2';
+
+
+
+uchar THREE = '3';
+
+
+
+uchar FOUR = '4';
+
+
+
+uchar FIVE = '5';
+
+
+
+uchar SIX = '6';
+
+
+
+
+
+
+
+// various flags
+
+
+
+bit crossFlag;
+
+
+
+uchar stop6;
+
+
+
+
+
+
+
+uchar code warning[] = "Drive Safely.";
+
+
+
+uchar code warning2[] = "Look Left-Right";
+
+
+
+uchar code secsNS[] = "Seconds NS:";
+
+
+
+uchar code secsEW[] = "Seconds EW:";
+
+
+
+
+
+
+
+
+
+
+
+// prototypes
+
+
+
+void outputLogic(void);
+
+
+
+void nextStateLogic(void);
+
+
+
+
+
+
+
+void delay_ms(void);
+
+
+
+void run6secDelay(void);
+
+
+
+void run2secDelay(void);
+
+
+
+void T1M2_25usDelay(void);
+
+
+
+void init_lcd(void);
+
+
+
+void write_to_lcd(unsigned char value, bit mode);
+
+
+
+void MSDelay(unsigned int itime);
+
+
+
+void lcdready(void);
+
+
+
+void init_lcdscroll(void);
+
+
+
+void Define_Doubles();
+
+
+
+void Put_Upper(unsigned char num); 
+
+
+
+void Put_Lower(unsigned char num);
+
+
+
+void Put_Double(unsigned char num, unsigned char col);
+
+
+
+
+
+
+
+void main(void)
+
+
+
+{
+
+
+
+  TMOD=0x20;  // timer 1, mode 2(8-bit, auto-reload)  
+
+
+
+
+
+
+
+	ET1 = 1;      // enable timer 1 overflow interrupt
+
+
+
+  	TH0=-23;
+
+
+
+	IT0 = 1; // set INT0 to be edge triggered
+
+
+
+	IT1 = 1;
+
+
+
+	//IE1 = 1;
+
+	//IE0 = 1;
+
+	
+
+	EX0=1; // enable INT0 
+
+
+
+	EX1=1;
+
+
+
+	EA=1; // enable interrupt 
+
+
+
+	presentState = 1;
+
+
+
+	bNSC = 1;
+
+
+
+	bEWC = 1;
+
+
+
+	TR1 = 1;
+
+
+
+
+
+	init_lcd();
+
+
+
+	
+
+
+
+	//Define_Doubles(); // definition at startup
+
+
+
+	
+
+
+
+	while(1)
+
+
+
+	{
+
+
+
+		
+
+
+
+		
+
+			
+
+
+
+		// output
+
+
+
+		outputLogic();
+
+
+
+					
+
+
+
+		// board settings
+
+
+
+		// lights
+
+
+
+		_NSG = NSG;
+
+
+
+    _NSY = NSY;
+
+
+
+    _NSR = NSR;
+
+
+
+   _NSC = NSC;
+
+
+
+   _EWG = EWG;
+
+
+
+   _EWY = EWY;
+
+
+
+   _EWR = EWR;
+
+
+
+   _EWC = EWC;
+
+
+
+		
+
+
+
+		// next state logic
+
+
+
+		nextStateLogic();
+
+
+
+		// delay between states
+
+		if(presentState == 1 || presentState == 3)
+
+		run6secDelay();
+
+		else
+
+		run2secDelay();
+
+
+
+		// state reg
+
+
+
+		presentState = nextState;
+
+
+
+		
+
+
+
+		
+
+
+
+	}
+
+
+
+}
+
+
+
+
+
+
+
+// interrupts
+
+
+
+void external0() interrupt 0
+
+
+
+{
+
+
+
+	fNSC = 1;
+
+
+
+}
+
+
+
+
+
+
+
+void external1() interrupt 2
+
+
+
+{
+
+
+
+	fEWC = 1;
+
+
+
+}
+
+
+
+
+
+
+
+// send data to LCD
+
+
+
+// setup LCD for the required display 
+
+
+
+void init_lcd()
+
+
+
+{
+
+// Function set format: 001 DL N F  * *
+
+  // Function set value: 00111000
+
+  // DL=1, use 8-bit data bus; N=1,1/16 duty(2 lines),
+
+  // F=0, 5x7 dot character font 
+
+  write_to_lcd(0x38,COMMAND);
+
+                    
+
+
+
+	write_to_lcd(0x80,COMMAND);
+
+  // Display On/Off Control format: 00001 D C B
+
+  // Display On/Off Control value: 00001100
+
+  // D=1, display o; C=0, cursor off; B=0, cursor blink off
+
+  write_to_lcd(0x0C,COMMAND);
+
+
+
+     
+
+write_to_lcd(0x14,COMMAND);
+
+  
+
+
+
+  // Clear display and returns cursor to the home position(address 0) 
+
+  write_to_lcd(0x01,COMMAND);
+
+
+
+}
+
+
+
+
+
+
+
+// write a command or a character to LCD
+
+
+
+void write_to_lcd(unsigned char value, bit mode)
+
+
+
+{
+
+
+
+  lcdready();
+
+
+
+  ldata = value; 
+
+
+
+  RS = mode; // set for data, reset for command
+
+
+
+  RW = 0;
+
+
+
+  EN = 1;
+
+
+
+  MSDelay(1);
+
+
+
+  EN = 0;
+
+
+
+}
+
+
+
+
+
+
+
+// wait for LCD to become ready
+
+
+
+void lcdready(void)
+
+
+
+{
+
+
+
+    busy = 1;
+
+
+
+  EN = 1;
+
+
+
+  RS = 0; // It's a command
+
+
+
+  RW = 1; // It's a read command
+
+
+
+  while (busy) {
+
+
+
+    EN = 0;
+
+
+
+    MSDelay(1);
+
+
+
+    EN = 1;
+
+
+
+	busy = 0;
+
+
+
+  }
+
+
+
+  EN=0;
+
+
+
+  RW=0;
+
+
+
+}
+
+
+
+
+
+
+
+void run6secDelay(void) // with counter for lcd
+
+
+
+{
+
+
+
+	uint j;
+
+
+
+	// init counter
+
+
+
+	counter = 6;
+
+
+
+	crossFlag = 0;
+
+
+
+	stop6 = 'N';
+
+
+
+	for (j=0;j<6;j++) // total of six seconds
+
+
+
+	{
+
+
+
+		if( _NSC == 1 || _EWC == 1) // check if crosswalk is signaled
+
+
+
+				crossFlag = 1;
+
+
+
+		
+
+
+
+			if(crossFlag == 1)
+
+
+
+				{
+
+
+
+					// display crosswalk counter
+
+
+
+					// position cursor to the right end of line 1, address 0F                                                                     // set cursor position command is 80H, address is 0FH
+
+
+
+					// 80H+0FH=8F               
+
+
+
+					write_to_lcd(0x80,COMMAND);
+
+
+
+						s = 0;
+
+
+
+							if(_NSC == 1)
+
+
+
+							{
+
+
+
+								while (secsNS[s]!='\0')
+
+							//write_to_lcd(0x80 + s,COMMAND);
+
+							write_to_lcd(secsNS[s++],LCD_DATA);
+
+
+
+							}
+
+
+
+							else if(_EWC == 1)
+
+
+
+							{
+
+
+
+								while (secsEW[s]!='\0')
+
+							//write_to_lcd(0x80 + s,COMMAND);
+
+							write_to_lcd(secsEW[s++],LCD_DATA);
+
+
+
+							}	 
+
+
+
+					//switch case for char to write
+
+
+
+					switch(counter)
+
+
+
+					{
+
+
+
+						case 6:
+
+
+
+							
+
+
+
+						write_to_lcd(0xCF,COMMAND);	 
+
+
+
+							
+
+
+
+						  //Put_Double(SIX,SIX);
+
+
+
+						  write_to_lcd(SIX,LCD_DATA);
+
+
+
+							break;
+
+
+
+						case 5:
+
+
+
+						  write_to_lcd(0xCF,COMMAND);
+
+						//Put_Double(FIVE,FIVE);
+
+						  write_to_lcd(FIVE,LCD_DATA);
+
+
+
+							break;
+
+
+
+						case 4:
+
+
+
+						   write_to_lcd(0xCF,COMMAND);
+
+
+
+						  //Put_Double(FOUR,FOUR);
+
+
+
+						  write_to_lcd(FOUR,LCD_DATA);
+
+
+
+							break;
+
+
+
+						case 3:
+
+
+
+						  write_to_lcd(0xCF,COMMAND);
+
+
+
+						 // Put_Double(THREE,THREE);
+
+
+
+						 write_to_lcd(THREE,LCD_DATA);
+
+
+
+							break;
+
+
+
+						case 2:
+
+
+
+							write_to_lcd(0xCF,COMMAND);
+
+
+
+						  //Put_Double(TWO,TWO);
+
+
+
+						  write_to_lcd(TWO,LCD_DATA);
+
+
+
+							break;
+
+
+
+						case 1:
+
+
+
+							write_to_lcd(0xCF,COMMAND);
+
+
+
+						  //Put_Double(ONE,ONE);
+
+
+
+						  write_to_lcd(ONE,LCD_DATA);
+
+
+
+							break;
+
+
+
+						case 0:
+
+
+						  write_to_lcd(0xCF,COMMAND);
+
+						  
+						  //Put_Double(ZERO,ZERO);
+
+						  write_to_lcd(ZERO,LCD_DATA);
+
+
+
+							break;
+
+
+
+						default:
+
+
+
+						
+
+
+
+							w=0;
+
+
+
+							while (warning[w]!='\0') 
+
+
+
+							write_to_lcd(warning[w++],LCD_DATA);
+
+							
+
+							write_to_lcd(0xC0,COMMAND);
+
+
+
+							w=0;
+
+
+
+							while (warning2[w]!='\0') 
+
+
+
+							write_to_lcd(warning2[w++],LCD_DATA);
+
+
+
+							break;
+
+					}
+
+				}
+				else
+				{
+
+
+
+				/*
+
+
+
+					// display crosswalk stop counter
+
+
+
+				// position cursor to the right end of line 1, address 0F                                                                     // set cursor position command is 80H, address is 0FH
+
+
+
+				// 80H+0FH=8F               
+
+
+
+				write_to_lcd(0x8F,COMMAND); 
+
+
+
+				//switch case for char to write
+
+
+
+				w=0;
+
+
+
+				while (warning[w]!='\0') 
+
+
+
+				write_to_lcd(warning[w++],LCD_DATA);
+
+
+
+				*/
+
+
+
+				}
+
+
+
+
+
+
+
+			 //write_to_lcd(counter,LCD_DATA);
+
+
+
+			//if(counter > 3) // do not blink loop
+
+
+
+			for(i = 0; i < ONE_SECOND; i++) // wait one second
+			{
+				 T1M2_25usDelay();
+			}
+
+
+
+			// flash lcd if under three seconds
+
+
+
+			/*
+
+
+
+			if(counter < 4)
+
+
+
+			{
+
+
+
+				for(i = 0; i < HALF_SECOND; i++) // wait half second second
+
+
+
+				{
+
+
+
+					 T1M2_25usDelay();
+
+
+
+				}
+
+
+
+				for(i = 0; i < HALF_SECOND; i++) // wait half second second
+
+
+
+				{
+
+
+
+					 T1M2_25usDelay();
+
+
+
+					 // clear lcd
+
+
+
+					 write_to_lcd(0x01,COMMAND); // Clear LCD
+
+
+
+				}
+
+
+
+			}
+
+
+
+			 */
+
+
+
+			counter = counter - 1; // dec crosswalk counter after one second
+
+
+
+			
+
+
+
+		}
+
+
+
+	write_to_lcd(0x01,COMMAND); // Clear LCD
+
+
+
+	// reset counter
+
+
+
+	counter = 6;
+
+
+
+}
+
+
+
+
+
+
+
+void T1M2_25usDelay(void) interrupt 3
+{
+
+
+
+  TR1=0;     // turn off timer 1
+
+
+
+	//while(TF1==0);
+
+
+
+	//TF1 = 0;
+
+
+
+  TR1=1;      // turn on Timer 1
+
+
+
+}
+
+
+
+
+
+
+
+void run2secDelay(void)
+
+
+
+{
+
+
+
+	uint j;
+
+
+
+	uchar stop = 'N';
+
+
+
+	for (j=0;j<2;j++) // total of two seconds
+
+
+
+	{
+
+
+
+		// display crosswalk stop counter
+
+
+
+				// position cursor to the right end of line 1, address 0F                                                                     // set cursor position command is 80H, address is 0FH
+
+
+
+				// 80H+0FH=8F               
+
+
+
+				write_to_lcd(0x80,COMMAND); 
+
+
+
+				//switch case for char to write
+
+
+
+				w=0;
+
+
+
+				while (warning[w]!='\0') 
+
+
+
+				write_to_lcd(warning[w++],LCD_DATA);
+
+				
+
+				
+
+				
+
+				write_to_lcd(0xC0,COMMAND);
+
+				
+
+				w=0;
+
+
+
+				while (warning2[w]!='\0') 
+
+
+
+				write_to_lcd(warning2[w++],LCD_DATA);
+
+				
+				
+
+
+
+		for(i = 0; i < ONE_SECOND; i++) // wait one second
+
+
+
+		{
+
+
+
+			 //T1M2_25usDelay();
+
+
+
+		}
+
+
+
+				
+
+
+
+				
+
+
+
+		}
+
+
+
+	write_to_lcd(0x01,COMMAND); // Clear LCD 
+
+
+
+}
+
+
+
+
+
+
+
+// the following code is removed due to some students observation
+
+
+
+// of their LCD malfunction
+
+
+
+//  if (mode == LCD_DATA) 
+
+
+
+//    MSDelay(100);
+
+
+
+void MSDelay(uint itime)
+
+
+
+{
+
+
+
+   uint i, j;
+
+
+
+   for (i=0;i<itime;i++)
+
+
+
+     for (j=0;j<1275;j++);
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+void delay_ms(void)	 
+
+
+
+{
+
+
+
+	TH0 = 0xFE;
+
+
+
+	TL0 = 0xFF;
+
+
+
+	TR0 = 1;
+
+
+
+	while(TF0 == 0);
+
+
+
+	TR0 = 0;
+
+
+
+	TF0 = 0;
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+void nextStateLogic(void)
+
+
+
+{
+
+
+
+	switch(presentState)
+
+
+
+	{
+
+
+
+		case 1:
+
+
+
+			
+
+
+
+			
+
+
+
+			nextState = 2;
+
+
+
+			break;
+
+
+
+		case 2:
+
+
+
+			
+
+
+
+			nextState = 3;
+
+
+
+			break;
+
+
+
+		case 3:
+
+
+
+			
+
+
+
+			nextState = 4;
+
+
+
+			break;
+
+
+
+		case 4:
+
+
+
+			
+
+
+
+			nextState = 1;
+
+
+
+			break;
+
+
+
+		default:
+
+
+
+			nextState = 1;
+
+
+
+			break;
+
+
+
+	}
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+void outputLogic(void)
+
+
+
+{
+
+
+
+switch(presentState)
+
+
+
+	{
+
+
+
+		case 1:
+
+
+
+			NSG = 0;
+
+
+
+			NSY = 0;
+
+
+
+			NSR = 1;
+
+
+
+			EWG = 1;
+
+
+
+			EWY = 0;
+
+
+
+			EWR = 0;
+
+
+			EWC = fEWC;
+			
+
+			NSC = 0;
+
+
+
+			
+
+
+
+			break;
+
+
+
+		case 2:
+
+
+
+			NSG = 0;
+
+
+
+			NSY = 0;
+
+
+
+			NSR = 1;
+
+
+
+			EWG = 0;
+
+
+
+			EWY = 1;
+
+
+
+			EWR = 0;
+
+
+
+			NSC = 0;
+
+
+
+			EWC = 0;
+
+
+
+			fEWC = 0;
+
+
+
+			break;
+
+
+
+		case 3:
+
+
+
+			NSG = 1;
+
+
+
+			NSY = 0;
+
+
+
+			NSR = 0;
+
+
+
+			EWG = 0;
+
+
+
+			EWY = 0;
+
+
+
+			EWR = 1;
+
+
+
+			NSC = fNSC;
+
+
+
+			EWC = 0;
+
+
+
+			break;
+
+
+
+		case 4:
+
+
+
+			NSG = 0;
+
+
+
+			NSY = 1;
+
+
+
+			NSR = 0;
+
+
+
+			EWG = 0;
+
+
+
+			EWY = 0;
+
+			EWR = 1;
+
+
+
+			NSC = 0;
+
+
+
+			EWC = 0;
+
+
+
+			fNSC = 0;
+
+
+
+			break;
+
+
+
+		
+
+
+
+		default:
+
+
+
+			_NSG = 1;
+
+
+
+			_NSY = 1;
+
+
+
+			_NSR = 1;
+
+
+
+			_EWG = 1;
+
+
+
+			_EWY = 1;
+
+
+
+			_EWR = 1;
+
+
+
+			_NSC = 1;
+
+
+
+			_EWC = 1;
+
+
+
+			fNSC = 0;
+
+
+
+			fEWC = 0;
+
+
+
+			break;
+
+
+
+	}
+
+
+
+}
+
+
+
+
+
+
+
+// uses all 8 user-defined characters in CGRAM
+
+
+
+// Here is the steps:
+
+
+
+// 1. set the starting address for CGRAM
+
+
+
+// 2. write the bitmap of the symbol to CGRAM row by row, 
+
+
+
+//    the address of the CGRAM will be incremented automatically 
+
+
+
+//    after each write.
+
+
+
+void Define_Doubles(void) 
+
+
+
+{ 
+
+
+
+  // save current address in DDRAM
+
+
+
+  // Set CGRAM address to zero'th character
+
+
+
+  // (automatically incremented after write)
+
+
+
+  write_to_lcd(Set_CGRAM_Address+0,COMMAND);     
+
+
+
+
+
+
+
+                                 //        BitPattern   DataByte     
+
+
+
+    // Character 0  //                 ==========   ========
+
+
+
+
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+
+
+
+
+    // Character 1
+
+
+
+
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+
+
+
+
+    // Character 2
+
+
+
+
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+    write_to_lcd(0x10,LCD_DATA); //   x x x * . . . .   00010000
+
+
+
+    write_to_lcd(0x10,LCD_DATA); //   x x x * . . . .   00010000
+
+
+
+    write_to_lcd(0x10,LCD_DATA); //   x x x * . . . .   00010000
+
+
+
+    write_to_lcd(0x10,LCD_DATA); //   x x x * . . . .   00010000
+
+
+
+    write_to_lcd(0x10,LCD_DATA); //   x x x * . . . .   00010000
+
+
+
+    write_to_lcd(0x10,LCD_DATA); //   x x x * . . . .   00010000
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+
+
+
+
+    // Character 3
+
+
+
+
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+
+
+
+
+    // Character 4
+
+
+
+
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+
+
+
+
+    // Character 5
+
+
+
+
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x11,LCD_DATA); //   x x x * . . . *   00010001
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+
+
+
+
+    // Character 6
+
+
+
+
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+
+
+
+
+    // Character 7
+
+
+
+
+
+
+
+    write_to_lcd(0x1F,LCD_DATA); //   x x x * * * * *   00011111
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+    write_to_lcd(0x01,LCD_DATA); //   x x x . . . . *   00000001
+
+
+
+
+
+
+
+    // Sure I could have used loops to cut down the code,
+
+
+
+    // but would it have been as clear?
+
+
+
+
+
+
+
+    // restore current address in DDRAM
+
+
+
+}
+
+
+
+
+
+
+
+// Display upper Half of Double-Height Digit Character
+
+
+
+void Put_Upper(unsigned char num) 
+
+
+
+{ 
+
+
+
+    switch (num) {
+
+
+
+        case  0: write_to_lcd(1,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  1: write_to_lcd(0,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  2: write_to_lcd(7,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  3: write_to_lcd(6,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  4: write_to_lcd(5,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  5: write_to_lcd(2,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  6: write_to_lcd(2,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  7: write_to_lcd(7,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  8: write_to_lcd(4,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  9: write_to_lcd(4,LCD_DATA);
+
+
+
+            break;
+
+
+
+        default: break; // something goes wrong!
+
+
+
+    }
+
+
+
+}
+
+
+
+// Lower Half of Double-Height Digit Character
+
+
+
+void Put_Lower(unsigned char num) 
+
+
+
+{ 
+
+
+
+    switch (num) {
+
+
+
+        case  0: write_to_lcd(5,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  1: write_to_lcd(0,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  2: write_to_lcd(2,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  3: write_to_lcd(3,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  4: write_to_lcd(0,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  5: write_to_lcd(3,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  6: write_to_lcd(5,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  7: write_to_lcd(0,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  8: write_to_lcd(5,LCD_DATA);
+
+
+
+            break;
+
+
+
+        case  9: write_to_lcd(3,LCD_DATA);
+
+
+
+            break;
+
+
+
+        default: break; // something goes wrong!
+
+
+
+    }
+
+
+
+}
+
+
+
+
+
+
+
+// 16 character x 2 line display
+
+
+
+void Put_Double(unsigned char num, unsigned char col) 
+
+
+
+{ 
+
+
+
+  // set DDRAM address to upper line of column
+
+
+
+  write_to_lcd(Set_DDRAM_Address + col,COMMAND); 
+
+
+
+  Put_Upper(num);
+
+
+
+
+
+
+
+  // set DDRAM address to lower line of column
+
+
+
+  write_to_lcd(Set_DDRAM_Address + col + Line2_Offset,COMMAND);
+
+
+
+  Put_Lower(num);
+
+
+
+}
